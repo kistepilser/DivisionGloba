@@ -427,7 +427,9 @@ function renderAuth(){
 function renderSyncChip(){
   var b=document.getElementById('syncbox');if(!b)return;
   if(!syncOn()){b.innerHTML='<span class="tag red">без общей базы</span>';return;}
-  b.innerHTML=syncState.status==='error'?'<span class="tag red">нет связи с базой</span>':'<span class="tag green">общая база</span>';
+  b.innerHTML=syncState.status==='error'
+    ?'<span class="tag red" title="'+esc(syncState.msg||'')+'">нет связи с базой</span>'
+    :'<span class="tag green">общая база</span>';
 }
 function render(){renderHeader();PAGE_RENDER();if(window.enhanceSelects)enhanceSelects(document);}
 
@@ -466,12 +468,29 @@ window.addEventListener('beforeunload',function(e){
 });
 
 /* ---------- Общая база (Supabase REST) ---------- */
-var syncState={status:'idle',at:null};
-function syncCfg(){
-  var ls=null;try{ls=JSON.parse(localStorage.getItem(SKEY)||'null');}catch(e){}
-  if(ls&&ls.url&&ls.key)return ls;
+var syncState={status:'idle',at:null,msg:''};
+function cfgFromFile(){
   var c=window.GRAFIK_CONFIG||{};
-  return {url:c.url||'',key:c.key||'',row:c.row||1,table:c.table||'grafik_state'};
+  var u=String(c.url||'').trim().replace(/\/+$/,''), k=String(c.key||'').trim();
+  return (u&&k)?{url:u,key:k,row:Number(c.row)||1,table:c.table||'grafik_state',src:'file'}:null;
+}
+function cfgFromBrowser(){
+  var ls=null;try{ls=JSON.parse(localStorage.getItem(SKEY)||'null');}catch(e){}
+  if(!ls||!ls.url||!ls.key)return null;
+  return {url:String(ls.url).trim().replace(/\/+$/,''),key:String(ls.key).trim(),
+    row:Number(ls.row)||1,table:ls.table||'grafik_state',src:'browser'};
+}
+/* Файл assets/config.js всегда главнее: иначе старые настройки
+   в браузере перебивают то, что выложено на хостинг. */
+function syncCfg(){
+  return cfgFromFile()||cfgFromBrowser()||{url:'',key:'',row:1,table:'grafik_state',src:'none'};
+}
+function resetSyncLocal(){
+  localStorage.removeItem(SKEY);
+  syncState={status:'idle',at:null,msg:''};
+  renderSyncChip();
+  toast('\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0430 \u0441\u0431\u0440\u043e\u0448\u0435\u043d\u044b \u2014 \u0431\u0435\u0440\u0451\u043c и\u0437 config.js');
+  if(syncOn())pullRemote(false);else if(PAGE_ID==='database')PAGE_RENDER();
 }
 function saveSyncCfg(c){localStorage.setItem(SKEY,JSON.stringify(c));}
 function syncOn(){var c=syncCfg();return !!(c.url&&c.key);}
@@ -481,13 +500,26 @@ function sApi(path,opts){
     headers:{apikey:c.key,Authorization:'Bearer '+c.key,'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'}
   },opts||{}));
 }
+async function httpErr(r,table){
+  var t='';try{t=await r.text();}catch(e){}
+  var hint='';
+  if(r.status===401||r.status===403)hint=' — ключ не подходит или не созданы политики доступа (выполните SQL ниже)';
+  if(r.status===404)hint=' — таблица "'+table+'" не найдена в проекте';
+  return 'HTTP '+r.status+hint+(t?': '+t.slice(0,160):'');
+}
+function netMsg(e){
+  var m=String((e&&e.message)||e||'');
+  if(/Failed to fetch|NetworkError|Load failed/i.test(m))
+    return 'браузер не достучался до адреса базы (проверьте Project URL, он должен быть https://... , и что проект Supabase не на паузе)';
+  return m;
+}
 async function pullRemote(silent){
   if(!syncOn())return;
   if(silent&&dirty)return;
   var c=syncCfg(),row=c.row||1,table=c.table||'grafik_state';
   try{
     var r=await sApi(table+'?id=eq.'+row+'&select=data,updated_at');
-    if(!r.ok)throw new Error(r.status);
+    if(!r.ok)throw new Error(await httpErr(r,table));
     var j=await r.json();
     if(j&&j[0]&&j[0].data&&j[0].data.objects){
       var meId=ui.me&&ui.me.id;
@@ -495,11 +527,11 @@ async function pullRemote(silent){
       localStorage.setItem(KEY,JSON.stringify(db));
       ui.me=meId?db.admins.find(function(a){return a.id===meId;})||null:null;
       if(!objById(ui.objectId))ui.objectId=db.objects[0]&&db.objects[0].id;
-      syncState={status:'ok',at:new Date()};clearDirty();
+      syncState={status:'ok',at:new Date(),msg:''};clearDirty();
       render();
       if(!silent)toast('Загружено из общей базы');
-    }else{syncState={status:'empty',at:new Date()};if(!silent)toast('В общей базе пока нет данных');}
-  }catch(e){syncState={status:'error',at:new Date()};if(!silent)toast('Нет связи с базой');}
+    }else{syncState={status:'empty',at:new Date(),msg:'Запись №'+row+' в таблице '+table+' пустая. Нажмите «Выгрузить в базу».'};if(!silent)toast('В общей базе пока нет данных');}
+  }catch(e){syncState={status:'error',at:new Date(),msg:netMsg(e)};if(!silent)toast('Не удалось загрузить: '+netMsg(e));}
   renderSyncChip();
   if(PAGE_ID==='database')PAGE_RENDER();
 }
@@ -508,10 +540,10 @@ async function pushRemote(silent){
   var c=syncCfg(),row=c.row||1,table=c.table||'grafik_state';
   try{
     var r=await sApi(table,{method:'POST',body:JSON.stringify([{id:row,data:db,updated_at:new Date().toISOString()}])});
-    if(!r.ok)throw new Error(r.status);
+    if(!r.ok)throw new Error(await httpErr(r,table));
     syncState={status:'ok',at:new Date()};clearDirty();
     if(!silent)toast('Сохранено в общую базу');
-  }catch(e){syncState={status:'error',at:new Date()};if(!silent)toast('Не удалось сохранить в общую базу');}
+  }catch(e){syncState={status:'error',at:new Date(),msg:netMsg(e)};if(!silent)toast('Не удалось сохранить: '+netMsg(e));}
   renderSyncChip();
   if(PAGE_ID==='database')PAGE_RENDER();
 }

@@ -31,6 +31,11 @@ function renderDatabase(){
       '<p class="muted" style="font-size:13.5px">'+(fromFile
         ?'Настройки взяты из файла <code>assets/config.js</code> — сайт сразу открывает общую базу на любом новом компьютере.'
         :'Файл <code>assets/config.js</code> пока не заполнен. Заполните его — иначе настройки будут жить только в браузере этого компьютера.')+'</p>'+
+      (c.src==='browser'?'<p class="muted" style="font-size:13px">Сейчас используются настройки из этого браузера, а не из файла.</p>':'')+
+      (syncState.msg?'<p class="tag red" style="display:inline-block;white-space:normal;line-height:1.45;margin-top:8px">'+esc(syncState.msg)+'</p>':'')+
+      '<div class="row" style="margin-top:10px;flex-wrap:wrap">'+
+        '<button class="btn sm" onclick="pullRemote(false)">Проверить связь</button>'+
+        '<button class="btn ghost sm" onclick="resetSyncLocal()">Сбросить настройки браузера</button></div>'+
       (syncState.at?'<p class="muted" style="font-size:12.5px">Последний обмен: '+syncState.at.toLocaleString('ru-RU')+'</p>':'')+'</div>'+
 
     '<div class="card"><h3>Подключение (Supabase)</h3>'+
@@ -55,7 +60,17 @@ function renderDatabase(){
       '<li>Вставьте их выше, нажмите «Сохранить и проверить», затем «Выгрузить в базу».</li>'+
       '<li>Скачайте config.js и замените им файл в папке assets на хостинге.</li></ol>'+
       '<pre class="code">'+esc(SQL_TEXT)+'</pre>'+
-      '<div class="row"><button class="btn sm" onclick="copySql()">Скопировать SQL</button></div></div>';
+      '<div class="row"><button class="btn sm" onclick="copySql()">Скопировать SQL</button></div></div>'+
+
+    '<div class="card"><h3>Если на GitHub Pages база не подгружается</h3>'+
+      '<ol class="steps">'+
+      '<li><b>Кеш GitHub Pages.</b> После заливки файлы раздаются старые ещё несколько минут. Обновите страницу с Ctrl+F5 (на телефоне — в режиме инкогнито).</li>'+
+      '<li><b>Файл не там.</b> Откройте адрес <code>ваш-сайт/assets/config.js</code> — там должны быть видны ваши url и key. Если 404 или пусто — файл лежит не в папке <code>assets</code>.</li>'+
+      '<li><b>Старые настройки в браузере.</b> Раньше они перебивали файл. Теперь главнее всегда <code>config.js</code>, а кнопка «Сбросить настройки браузера» выше чистит остатки.</li>'+
+      '<li><b>Политики в Supabase.</b> Ошибка 401/403 — не выполнен SQL или взят не <i>anon public</i> ключ.</li>'+
+      '<li><b>Проект на паузе.</b> Бесплатный Supabase засыпает после недели без запросов — нажмите Restore в панели Supabase.</li>'+
+      '<li><b>Адрес базы.</b> В <code>url</code> нужен именно Project URL вида <code>https://xxxx.supabase.co</code>, без <code>/rest/v1</code> и без косой черты в конце.</li></ol>'+
+      '<p class="muted" style="font-size:12.5px">Точная причина всегда пишется красным в блоке «Состояние» выше.</p></div>';
 }
 function saveSync(){
   var c={url:document.getElementById('s-url').value.trim().replace(/\/$/,''),
